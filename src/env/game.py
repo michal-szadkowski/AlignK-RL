@@ -3,20 +3,39 @@ import torch.nn.functional as F
 
 
 class Game:
-    def __init__(self, board_size: int, win_condition: int, device: torch.device):
+    def __init__(self, board_size: int, win_condition: int, n_envs: int, device: torch.device):
         self.board_size = board_size
         self.win_condition = win_condition
+        self.n_envs = n_envs
         self.max_moves = board_size * board_size
 
         self.device = device
 
         self.filters = self._create_win_filters().to(self.device)
-        self.reset()
+        self.board = torch.zeros(
+            self.n_envs,
+            2,
+            self.board_size,
+            self.board_size,
+            dtype=torch.float32,
+            device=self.device,
+        )
+        self.current_player = torch.zeros(self.n_envs, dtype=torch.int, device=device)
+        self.move_count = torch.zeros(self.n_envs, dtype=torch.int, device=device)
 
-    def reset(self):
-        self.board = torch.zeros(2, self.board_size, self.board_size, dtype=torch.float32, device=self.device)
-        self.current_player = torch.zeros((1,), dtype=torch.int)
-        self.move_count = torch.zeros((1,), dtype=torch.int)
+    def reset(self, envs_to_reset=None):
+        if envs_to_reset is None:
+            self.board.zero_()
+            self.current_player.zero_()
+            self.move_count.zero_()
+            return
+
+        if not envs_to_reset.any():
+            return
+
+        self.board[envs_to_reset] = 0.0
+        self.current_player[envs_to_reset] = 0
+        self.move_count[envs_to_reset] = 0
 
     def _create_win_filters(self) -> torch.Tensor:
         n = self.win_condition
@@ -30,40 +49,58 @@ class Game:
         return f
 
     def get_canonical_state(self):
-        if self.current_player == 1:
-            state = torch.flip(self.board, dims=[0])
-        else:
-            state = self.board.clone()
+        env_idx = torch.arange(self.n_envs, device=self.device)
+        chan_idx = torch.stack([self.current_player, 1 - self.current_player], dim=1)
 
-        return state.unsqueeze(0)
+        return self.board[env_idx[:, None], chan_idx]
 
-    def make_move(self, action: torch.Tensor) -> tuple[torch.Tensor, torch.Tensor]:
-        x, y = torch.unravel_index(action, (self.board_size, self.board_size))
+    def make_move(
+        self, action: torch.Tensor, envs_to_move: torch.Tensor | None = None
+    ) -> tuple[torch.Tensor, torch.Tensor]:
+        if envs_to_move is None:
+            envs_to_move = torch.ones(self.n_envs, dtype=torch.bool, device=self.device)
 
-        if self.board[:, x, y].sum() > 0:
-            raise ValueError(f"Space ({x}, {y}) is taken")
+        if action.numel() != int(envs_to_move.sum().item()):
+            raise ValueError("action must match number of active envs")
 
-        self.board[self.current_player, x, y] = 1.0
-        self.move_count += 1
+        if not envs_to_move.any():
+            zeros = torch.zeros(self.n_envs, dtype=torch.bool, device=self.device)
+            return zeros, zeros
 
-        win = self.check_win_full()
-        draw = self.check_draw()
+        x = action // self.board_size
+        y = action % self.board_size
 
-        if not (win | draw):
-            self.current_player = 1 - self.current_player
+        env_idx = torch.arange(self.n_envs, device=self.device)[envs_to_move]
+        cp = self.current_player[envs_to_move]
+
+        occupied = self.board[env_idx, 0, x, y] + self.board[env_idx, 1, x, y] > 0
+        if occupied.any():
+            raise ValueError("Some selected moves are occupied.")
+
+        self.board[env_idx, cp, x, y] = 1.0
+        self.move_count[envs_to_move] += 1
+
+        win = self.check_win_full() & envs_to_move
+        draw = self.check_draw() & envs_to_move
+        done = win | draw
+
+        self.current_player[envs_to_move] = torch.where(done[envs_to_move], cp, 1 - cp)
 
         return win, draw
 
     def check_win_full(self) -> torch.Tensor:
         n = self.win_condition
-        layer = self.board[self.current_player]
+        env_idx = torch.arange(self.n_envs, device=self.device)
 
-        results = F.conv2d(layer, self.filters, padding=n // 2)
+        layer = self.board[env_idx, self.current_player]
 
-        return (results >= n).any()
+        results = F.conv2d(layer.unsqueeze(1), self.filters, padding=n // 2)
+
+        return (results >= n).any(dim=(1, 2, 3))
 
     def get_legal_moves_mask(self) -> torch.Tensor:
-        return (self.board.flatten(-2, -1).sum(dim=0) == 0).unsqueeze(0)
+        occupied = self.board.flatten(2).sum(dim=1) > 0
+        return ~occupied
 
     def check_draw(self) -> torch.Tensor:
-        return (self.move_count >= self.max_moves).to(self.device)
+        return self.move_count >= self.max_moves
