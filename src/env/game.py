@@ -67,17 +67,17 @@ class Game:
             zeros = torch.zeros(self.n_envs, dtype=torch.bool, device=self.device)
             return zeros, zeros
 
-        x = action // self.board_size
-        y = action % self.board_size
+        row = action // self.board_size
+        col = action % self.board_size
 
         env_idx = torch.arange(self.n_envs, device=self.device)[envs_to_move]
         cp = self.current_player[envs_to_move]
 
-        occupied = self.board[env_idx, 0, x, y] + self.board[env_idx, 1, x, y] > 0
+        occupied = self.board[env_idx, 0, row, col] + self.board[env_idx, 1, row, col] > 0
         if occupied.any():
             raise ValueError("Some selected moves are occupied.")
 
-        self.board[env_idx, cp, x, y] = 1.0
+        self.board[env_idx, cp, row, col] = 1.0
         self.move_count[envs_to_move] += 1
 
         win = self.check_win_full() & envs_to_move
@@ -104,3 +104,31 @@ class Game:
 
     def check_draw(self) -> torch.Tensor:
         return self.move_count >= self.max_moves
+
+    def print_nice(self):
+        size = self.board_size
+        idx_width = max(2, len(str(size - 1)))
+        cell_width = max(2, idx_width)
+
+        for env in range(self.n_envs):
+            print(f"\nEnv {env}")
+            print(" " * (idx_width + 3), end="")
+            for col in range(size):
+                print(f"{col:>{cell_width}}", end=" ")
+            print()
+
+            separator = " " * (idx_width + 1) + "+" + "-" * ((cell_width + 1) * size + 1)
+            print(separator)
+
+            for row in range(size):
+                print(f"{row:>{idx_width}} |", end=" ")
+                for col in range(size):
+                    if self.board[env, 0, row, col] == 1:
+                        symbol = "O"
+                    elif self.board[env, 1, row, col] == 1:
+                        symbol = "X"
+                    else:
+                        symbol = "."
+                    print(f"{symbol:>{cell_width}}", end=" ")
+                print()
+            print()
