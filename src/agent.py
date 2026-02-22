@@ -11,6 +11,10 @@ class Agent(nn.Module):
         self.network = nn.Sequential(
             nn.Conv2d(2, 32, kernel_size=3, padding=1),
             nn.ReLU(),
+            nn.Conv2d(32, 32, kernel_size=3, padding=1),
+            nn.ReLU(),
+            nn.Conv2d(32, 32, kernel_size=3, padding=1),
+            nn.ReLU(),
             nn.Conv2d(32, 1, kernel_size=3, padding=1),
             nn.ReLU(),
             nn.Flatten(),

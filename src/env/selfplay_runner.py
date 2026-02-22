@@ -13,7 +13,8 @@ class SelfplayRunner:
         self.n_envs = game.n_envs
         self.buffer = buffer
         self.opponent_pool = opponent_pool
-        self.opponent = opponent_pool.get_model()
+
+        self.opponents = opponent_pool.sample_id(self.n_envs, self.buffer.device)
 
         self.play_as = torch.zeros(self.n_envs, dtype=torch.int8, device=self.buffer.device)
         self.reset()
@@ -67,15 +68,27 @@ class SelfplayRunner:
         if not envs_to_move.any():
             return torch.zeros_like(envs_to_move), torch.zeros_like(envs_to_move)
 
-        obs = self.game.get_canonical_state()[envs_to_move]
+        obs_all = self.game.get_canonical_state()
+        mask_all = self.game.get_legal_moves_mask()
 
-        logits = self.opponent.forward_logits(obs)
-        act_mask = self.game.get_legal_moves_mask()[envs_to_move]
-        logits[~act_mask] = -torch.inf
-        dist = Categorical(logits=logits)
-        action = dist.sample()
+        active_idx = torch.where(envs_to_move)[0]
 
-        win, draw = self.game.make_move(action, envs_to_move)
+        opp_ids_active = self.opponents[active_idx]
+        action_active = torch.empty(active_idx.numel(), dtype=torch.long, device=obs_all.device)
+
+        for opp_id in opp_ids_active.unique():
+            grp = opp_ids_active == opp_id
+            grp_idx = active_idx[grp]
+
+            model = self.opponent_pool.get_model(int(opp_id.item()))
+            logits = model.forward_logits(obs_all[grp_idx])
+            act_mask = mask_all[grp_idx]
+            logits[~act_mask] = -torch.inf
+
+            dist = Categorical(logits=logits)
+            action_active[grp] = dist.sample()
+
+        win, draw = self.game.make_move(action_active, envs_to_move)
         return win, draw
 
     def reset(self, envs_to_reset: torch.Tensor | None = None):
@@ -86,6 +99,9 @@ class SelfplayRunner:
             self.game.reset(envs_to_reset)
             self._resample_play_as(envs_to_reset)
             self._make_first_move(envs_to_reset)
+            self.opponents[envs_to_reset] = self.opponent_pool.sample_id(
+                int(envs_to_reset.sum().item()), self.buffer.device
+            )
 
     def _resample_play_as(self, envs: torch.Tensor):
         if envs.any():

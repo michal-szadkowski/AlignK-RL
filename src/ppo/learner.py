@@ -10,7 +10,7 @@ class PPOLearner:
         self.buffer = buffer
         self.agent = agent
         self.optimizer = torch.optim.AdamW(agent.parameters())
-        self.minibatch_size = 64
+        self.minibatch_size = 512
         self.epochs = 10
         self.clip_coef = 0.2
 
