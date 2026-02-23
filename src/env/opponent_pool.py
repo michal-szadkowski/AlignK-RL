@@ -1,26 +1,28 @@
 import copy
-
-import numpy as np
 import torch
-
-from agent import Agent
+from ppo.actor_critic_module import ActorCriticModule
 
 
 class OpponentPool:
 
-    def __init__(self, max_size: int, device: torch.device):
+    def __init__(self, current_agent, max_size: int, device: torch.device):
         self.max_size = max_size
         self.models = []
         self.device = device
+        self.current_agent = current_agent
 
-    def add(self, model: Agent):
+    def add(self, model: ActorCriticModule):
         snapshot = copy.deepcopy(model).to(self.device).eval()
         self.models.append(snapshot)
         if len(self.models) > self.max_size:
             self.models.pop(0)
 
     def sample_id(self, envs: int, device: torch.device):
-        return torch.randint(0, self.max_size, (envs,), device=device)
+        n = len(self.models)
+        return torch.randint(0, n + 1, (envs,), device=device)
 
-    def get_model(self, id: int) -> Agent:
-        return self.models[id % len(self.models)]
+    def get_model(self, id: int) -> ActorCriticModule:
+        n = len(self.models)
+        if n == 0 or id == n:
+            return self.current_agent
+        return self.models[id]

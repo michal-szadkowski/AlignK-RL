@@ -1,11 +1,9 @@
 import torch
-from agent import Agent
+from env.player import get_distribution, sample_action
+from ppo.actor_critic_module import ActorCriticModule
 from env.game import Game
 from env.opponent_pool import OpponentPool
 from ppo.replay_buffer import RolloutBuffer
-
-from torch.distributions import Categorical
-
 
 class SelfplayRunner:
     def __init__(self, game: Game, buffer: RolloutBuffer, opponent_pool: OpponentPool):
@@ -19,28 +17,24 @@ class SelfplayRunner:
         self.play_as = torch.zeros(self.n_envs, dtype=torch.int8, device=self.buffer.device)
         self.reset()
 
-    def run(self, player: Agent):
+    def run(self, player: ActorCriticModule):
         with torch.no_grad():
             avg_rewards = []
             for i in range(self.buffer.n_steps):
 
                 obs = self.game.get_canonical_state()
-
-                logits, value = player.forward_logits_value(obs)
                 act_mask = self.game.get_legal_moves_mask()
-                logits[~act_mask] = -torch.inf
-                dist = Categorical(logits=logits)
+
+                dist, value = get_distribution(player, obs, act_mask)
                 action = dist.sample()
 
                 rewards = torch.zeros((self.n_envs,), device=self.buffer.device)
 
                 win, draw = self.game.make_move(action)
-
                 done = win | draw
                 rewards[win] = 1
 
                 lose, draw2 = self._make_opponent_move(~done)
-
                 done_after_opponent = lose | draw2
                 rewards[lose] = -1
 
@@ -59,7 +53,7 @@ class SelfplayRunner:
 
                 self.reset(done | done_after_opponent)
 
-            last_val = player.forward_value(self.game.get_canonical_state())
+            _, last_val = get_distribution(player, self.game.get_canonical_state(), self.game.get_legal_moves_mask())
             self.buffer.compute_advantages(last_val.squeeze(-1))
 
             print(sum(avg_rewards) / len(avg_rewards) if avg_rewards else 0.0)
@@ -81,12 +75,8 @@ class SelfplayRunner:
             grp_idx = active_idx[grp]
 
             model = self.opponent_pool.get_model(int(opp_id.item()))
-            logits = model.forward_logits(obs_all[grp_idx])
-            act_mask = mask_all[grp_idx]
-            logits[~act_mask] = -torch.inf
-
-            dist = Categorical(logits=logits)
-            action_active[grp] = dist.sample()
+            action = sample_action(model, obs_all[grp_idx], mask_all[grp_idx])
+            action_active[grp] = action
 
         win, draw = self.game.make_move(action_active, envs_to_move)
         return win, draw

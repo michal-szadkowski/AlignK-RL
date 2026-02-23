@@ -1,17 +1,25 @@
 from typing import Sequence
-
 import math
 import torch
 import torch.nn as nn
+from ppo.actor_critic_module import ActorCriticModule, ActorCriticOut
 
 
-class Agent(nn.Module):
+class ConvActorCritic(ActorCriticModule):
     def __init__(self, obs_shape: Sequence[int], act_size: int, device: torch.device):
         super().__init__()
         self.network = nn.Sequential(
             nn.Conv2d(2, 32, kernel_size=3, padding=1),
             nn.ReLU(),
             nn.Conv2d(32, 64, kernel_size=3, padding=1),
+            nn.ReLU(),
+            nn.Conv2d(64, 64, kernel_size=3, padding=1),
+            nn.ReLU(),
+            nn.Conv2d(64, 64, kernel_size=3, padding=1),
+            nn.ReLU(),
+            nn.Conv2d(64, 64, kernel_size=3, padding=1),
+            nn.ReLU(),
+            nn.Conv2d(64, 64, kernel_size=3, padding=1),
             nn.ReLU(),
             nn.Conv2d(64, 64, kernel_size=3, padding=1),
             nn.ReLU(),
@@ -28,12 +36,6 @@ class Agent(nn.Module):
             nn.Linear(math.prod(obs_shape), act_size),
         ).to(device)
 
-    def forward_logits_value(self, x: torch.Tensor) -> tuple[torch.Tensor, torch.Tensor]:
+    def forward(self, x: torch.Tensor) -> ActorCriticOut:
         y = self.network(x)
-        return self.policy_head(y), self.value_head(y)
-
-    def forward_logits(self, x: torch.Tensor) -> torch.Tensor:
-        return self.policy_head(self.network(x))
-
-    def forward_value(self, x: torch.Tensor) -> torch.Tensor:
-        return self.value_head(self.network(x))
+        return ActorCriticOut(self.policy_head(y), self.value_head(y))

@@ -1,12 +1,13 @@
+import torch
 from torch.distributions import Categorical
 import torch.optim
 import torch.nn.functional as F
-from agent import Agent
+from ppo.actor_critic_module import ActorCriticModule
 from ppo.replay_buffer import RolloutBuffer
 
 
 class PPOLearner:
-    def __init__(self, buffer: RolloutBuffer, agent: Agent):
+    def __init__(self, buffer: RolloutBuffer, agent: ActorCriticModule):
         self.buffer = buffer
         self.agent = agent
         self.optimizer = torch.optim.AdamW(agent.parameters())
@@ -21,7 +22,7 @@ class PPOLearner:
             for batch in self.buffer.get_enumerator(self.minibatch_size):
                 self.optimizer.zero_grad()
 
-                new_logits, new_value = self.agent.forward_logits_value(batch.observations)
+                new_logits, new_value = self.agent.forward(batch.observations)
                 new_logits[~batch.act_mask] = -torch.inf
                 dist = Categorical(logits=new_logits)
 

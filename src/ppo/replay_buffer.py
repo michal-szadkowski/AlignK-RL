@@ -86,15 +86,6 @@ class RolloutBuffer:
                 b_advantages[batch_idx],
                 b_returns[batch_idx],
             )
-            # yield (
-            #     b_obs[batch_idx],
-            #     b_actions[batch_idx],
-            #     b_log_probs[batch_idx],
-            #     b_returns[batch_idx],
-            #     b_advantages[batch_idx],
-            #     b_masks[batch_idx],
-            #     b_values[batch_idx],
-            # )
 
 
 class BufferBatch(NamedTuple):
