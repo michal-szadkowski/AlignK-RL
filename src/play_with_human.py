@@ -15,9 +15,12 @@ class PlayWithHuman:
         human_turn = human_first
         while True:
             if human_turn:
-                self._make_human_move(game)
+                done = self._make_human_move(game)
             else:
-                self._make_model_move(game, module)
+                done = self._make_model_move(game, module)
+
+            if done:
+                break
 
             human_turn = not human_turn
 

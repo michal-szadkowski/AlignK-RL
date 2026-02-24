@@ -99,11 +99,12 @@ class SelfplayRunner:
         if envs_to_reset.any():
             self.game.reset(envs_to_reset)
             self._resample_play_as(envs_to_reset)
-            self._make_first_move(envs_to_reset)
             self.opponents[envs_to_reset] = self.opponent_pool.sample_id(
                 int(envs_to_reset.sum().item()), self.buffer.device
             )
             self.ep_lengths[envs_to_reset] = 0
+
+            self._make_first_move(envs_to_reset)
 
     def _resample_play_as(self, envs: torch.Tensor):
         if envs.any():
