@@ -1,6 +1,7 @@
 import torch
 from torch.distributions import Categorical
 
+from play_with_human import PlayWithHuman
 from ppo.agent_module import ConvActorCritic
 from env.game import Game
 from env.opponent_pool import OpponentPool
@@ -10,7 +11,7 @@ from ppo.replay_buffer import RolloutBuffer
 import time
 
 device = torch.device("cuda")
-board_size = 12
+board_size = 9
 k = 5
 n_envs = 64
 
@@ -32,33 +33,15 @@ for iteration in range(500):
     learner.learn()
     t2 = time.perf_counter()
 
-    if iteration % 3 == 0:
+    if iteration % 5 == 0:
         opponents.add(agent)
 
     print(f"iter={iteration:4d} run={t1 - t0:.3f}s learn={t2 - t1:.3f}s total={t2 - t0:.3f}s")
 
 
-game = Game(board_size, k, 1, device)
+env = PlayWithHuman(board_size, k)
+human_first = False
+agent.to("cpu")
 while True:
-    obs = game.get_canonical_state()
-
-    logits, value = agent.forward(obs)
-    act_mask = game.get_legal_moves_mask()
-    logits[~act_mask] = -torch.inf
-    dist = Categorical(logits=logits)
-    action = dist.sample()
-
-    win, draw = game.make_move(action)
-
-    done = win | draw
-    if done:
-        break
-
-    game.print_nice()
-    x = int(input("Move: ").strip())
-    y = int(input("Move: ").strip())
-    win, draw = game.make_move(torch.tensor([x * board_size + y], device=device))
-    done = win | draw
-    if done:
-        print("Won")
-        break
+    env.run(agent, human_first)
+    human_first = not human_first

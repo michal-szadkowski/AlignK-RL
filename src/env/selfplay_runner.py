@@ -5,6 +5,7 @@ from env.game import Game
 from env.opponent_pool import OpponentPool
 from ppo.replay_buffer import RolloutBuffer
 
+
 class SelfplayRunner:
     def __init__(self, game: Game, buffer: RolloutBuffer, opponent_pool: OpponentPool):
         self.game = game
@@ -15,11 +16,15 @@ class SelfplayRunner:
         self.opponents = opponent_pool.sample_id(self.n_envs, self.buffer.device)
 
         self.play_as = torch.zeros(self.n_envs, dtype=torch.int8, device=self.buffer.device)
+
+        self.ep_lengths = torch.zeros(self.n_envs, dtype=torch.int, device=self.buffer.device)
         self.reset()
 
     def run(self, player: ActorCriticModule):
         with torch.no_grad():
             avg_rewards = []
+            avg_ep_len = []
+
             for i in range(self.buffer.n_steps):
 
                 obs = self.game.get_canonical_state()
@@ -31,10 +36,10 @@ class SelfplayRunner:
                 rewards = torch.zeros((self.n_envs,), device=self.buffer.device)
 
                 win, draw = self.game.make_move(action)
-                done = win | draw
+                done_after_player = win | draw
                 rewards[win] = 1
 
-                lose, draw2 = self._make_opponent_move(~done)
+                lose, draw2 = self._make_opponent_move(~done_after_player)
                 done_after_opponent = lose | draw2
                 rewards[lose] = -1
 
@@ -44,19 +49,25 @@ class SelfplayRunner:
                     rewards,
                     value.squeeze(-1),
                     dist.log_prob(action),
-                    done | done_after_opponent,
+                    done_after_player | done_after_opponent,
                     act_mask,
                 )
 
-                if (done | done_after_opponent).any():
-                    avg_rewards.append(rewards[done | done_after_opponent].mean().cpu().item())
+                episode_done = done_after_player | done_after_opponent
 
-                self.reset(done | done_after_opponent)
+                self.ep_lengths += 1
+                if episode_done.any():
+                    avg_rewards.append(rewards[episode_done].mean().cpu().item())
+                    finished_lengths = self.ep_lengths[episode_done].detach().cpu().tolist()
+                    avg_ep_len.extend(finished_lengths)
+
+                self.reset(episode_done)
 
             _, last_val = get_distribution(player, self.game.get_canonical_state(), self.game.get_legal_moves_mask())
             self.buffer.compute_advantages(last_val.squeeze(-1))
 
             print(sum(avg_rewards) / len(avg_rewards) if avg_rewards else 0.0)
+            print(sum(avg_ep_len) / len(avg_ep_len) if avg_ep_len else 0.0)
 
     def _make_opponent_move(self, envs_to_move: torch.Tensor):
         if not envs_to_move.any():
@@ -92,6 +103,7 @@ class SelfplayRunner:
             self.opponents[envs_to_reset] = self.opponent_pool.sample_id(
                 int(envs_to_reset.sum().item()), self.buffer.device
             )
+            self.ep_lengths[envs_to_reset] = 0
 
     def _resample_play_as(self, envs: torch.Tensor):
         if envs.any():
